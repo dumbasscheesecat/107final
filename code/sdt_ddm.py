@@ -12,7 +12,7 @@ import os
 
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
-OUTPUT_DIR = ROOT_DIR / "output" #you put output dir within a function so im putting one outside also
+OUTPUT_DIR = ROOT_DIR / "output" #i removed the other definition since i want this globally anyways
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mapping dictionaries for categorical variables
@@ -238,10 +238,6 @@ def draw_delta_plots(data, pnum):
     fig, axes = plt.subplots(n_conditions, n_conditions, 
                             figsize=(4*n_conditions, 4*n_conditions))
     
-    # Create output directory
-    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
     # Define marker style for plots
     marker_style = {
         'marker': 'o',
@@ -316,6 +312,8 @@ def draw_delta_plots(data, pnum):
             
     # Save the figure
     plt.savefig(OUTPUT_DIR / f'delta_plots_{pnum}.png')
+    plt.close(fig) #added for debugging
+    print(f"Saved delta plot for participant {pnum} to {OUTPUT_DIR}")
 
 #MY STUFFS
 
