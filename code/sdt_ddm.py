@@ -365,44 +365,108 @@ def analyze_results(idata, data):
     plt.savefig(FIG_DIR / "forest_plot_d_c.png")
     plt.close()
 
-#max and min stats by conditions, desc_df.groupby is gpt
-    desc_df = data.groupby(['pnum', 'condition']).apply(lambda df: pd.Series({
-        'mean_rt': df[[f'p{p}' for p in [10,30,50,70,90]]].mean(axis=1).mean()
-    })).reset_index()
+#min and max false alarm and hit rate of idata
+    hit_rates = 1 / (1 + np.exp(-(d - c)))  # sigmoid(d - c)
+    fa_rates = 1 / (1 + np.exp(c))          # sigmoid(-c)
 
-    stat_summary = desc_df.groupby("condition").agg(
-        max_rt=('mean_rt', 'max'),
-        min_rt=('mean_rt', 'min')
+    hr_df = pd.DataFrame(hit_rates, columns=[f"hit_{i}" for i in range(hit_rates.shape[1])])
+    fa_df = pd.DataFrame(fa_rates, columns=[f"fa_{i}" for i in range(fa_rates.shape[1])])
+    hr_df['pnum'] = range(1, hit_rates.shape[0] + 1)
+    fa_df['pnum'] = range(1, fa_rates.shape[0] + 1)
+
+    rates_df = pd.merge(hr_df, fa_df, on='pnum')
+    hr_long = hr_df.melt(id_vars='pnum', var_name='condition', value_name='hit_rate')
+    fa_long = fa_df.melt(id_vars='pnum', var_name='condition', value_name='fa_rate')
+    hr_long['condition'] = hr_long['condition'].str.extract(r'(\d+)').astype(int)
+    fa_long['condition'] = fa_long['condition'].str.extract(r'(\d+)').astype(int)
+
+    rate_df = pd.merge(hr_long, fa_long, on=['pnum', 'condition'])
+
+    rate_summary = rate_df.groupby("condition").agg(
+        max_hit_rate=('hit_rate', 'max'),
+        min_hit_rate=('hit_rate', 'min'),
+        max_fa_rate=('fa_rate', 'max'),
+        min_fa_rate=('fa_rate', 'min')
     )
 
     idxs = {
-        'max_rt': desc_df.groupby("condition")['mean_rt'].idxmax(),
-        'min_rt': desc_df.groupby("condition")['mean_rt'].idxmin(),
+        'max_hit_rate': rate_df.groupby("condition")['hit_rate'].idxmax(),
+        'min_hit_rate': rate_df.groupby("condition")['hit_rate'].idxmin(),
+        'max_fa_rate': rate_df.groupby("condition")['fa_rate'].idxmax(),
+        'min_fa_rate': rate_df.groupby("condition")['fa_rate'].idxmin(),
     }
-
     for key, idx in idxs.items():
-        stat_summary[f"{key}_participant"] = desc_df.loc[idx, 'pnum'].values
+        rate_summary[f"{key}_participant"] = rate_df.loc[idx, 'pnum'].values
 
-    stat_summary.to_csv(OUT_DIR / "condition_stat_summary.csv")
+    rate_summary.to_csv(OUT_DIR / "condition_rate_summary.csv")
 
-#final summary for comparison like with stroop.py
-    mu_d_samples = idata.posterior['mu_d_k']
-    contrasts = { #this setup by gpt
-        'Easy_vs_Hard': mu_d_samples[..., 0:2].mean(dim=-1) - mu_d_samples[..., 2:4].mean(dim=-1),
-        'Simple_vs_Complex': mu_d_samples[..., [0,2]].mean(dim=-1) - mu_d_samples[..., [1,3]].mean(dim=-1),
-        'Easy_Simple_vs_Hard_Complex': mu_d_samples[..., 0] - mu_d_samples[..., 3],
-        'Easy_Complex_vs_Hard_Simple': mu_d_samples[..., 1] - mu_d_samples[..., 2]
+#final summary for comparison like with stroop.py, first is discriminability
+    mu_d_samples = idata.posterior['mean_d_prime']
+
+    d_contrasts = { #this setup by gpt
+        'Easy_vs_Hard': mu_d_samples.sel(mean_d_prime_dim_0=[0, 1]).mean(dim='mean_d_prime_dim_0') -
+                        mu_d_samples.sel(mean_d_prime_dim_0=[2, 3]).mean(dim='mean_d_prime_dim_0'),
+
+        'Simple_vs_Complex': mu_d_samples.sel(mean_d_prime_dim_0=[0, 2]).mean(dim='mean_d_prime_dim_0') -
+                            mu_d_samples.sel(mean_d_prime_dim_0=[1, 3]).mean(dim='mean_d_prime_dim_0'),
+
+        'Easy_Simple_vs_Easy_Complex': mu_d_samples.sel(mean_d_prime_dim_0=0) -
+                                   mu_d_samples.sel(mean_d_prime_dim_0=1),
+
+        'Easy_Simple_vs_Hard_Simple': mu_d_samples.sel(mean_d_prime_dim_0=0) -
+                                  mu_d_samples.sel(mean_d_prime_dim_0=2),
+
+        'Hard_Simple_vs_Hard_Complex': mu_d_samples.sel(mean_d_prime_dim_0=2) -
+                                   mu_d_samples.sel(mean_d_prime_dim_0=3),
+
+        'Easy_Complex_vs_Hard_Complex': mu_d_samples.sel(mean_d_prime_dim_0=1) -
+                                    mu_d_samples.sel(mean_d_prime_dim_0=3)
     }
-    contrast_idata = az.from_dict(posterior={name: val for name, val in contrasts.items()}) #gpt suggested
+    d_idata = az.from_dict(posterior={name: val for name, val in d_contrasts.items()}) #gpt suggested
 
-    for name in contrasts:
+    for name in d_contrasts:
         print(f"\nSummary of d' difference: {name.replace('_', ' ')}")
-        print(az.summary(contrast_idata, var_names=[name], hdi_prob=0.94))
+        print(az.summary(d_idata, var_names=[name], hdi_prob=0.94))
 
-        az.plot_posterior(contrast_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
+        az.plot_posterior(d_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
         plt.tight_layout()
         plt.suptitle(f"Posterior of d' Contrast: {name.replace('_', ' ')}", y=1.02)
         plt.savefig(FIG_DIR / f"dprime_contrast_{name}.png")
+        plt.close()
+
+#for criterion
+    mu_c_samples = idata.posterior['mean_criterion']
+
+    c_contrasts = {
+        'Easy_vs_Hard': mu_c_samples.sel(mean_criterion_dim_0=[0, 1]).mean(dim='mean_criterion_dim_0') -
+                        mu_c_samples.sel(mean_criterion_dim_0=[2, 3]).mean(dim='mean_criterion_dim_0'),
+
+        'Simple_vs_Complex': mu_c_samples.sel(mean_criterion_dim_0=[0, 2]).mean(dim='mean_criterion_dim_0') -
+                         mu_c_samples.sel(mean_criterion_dim_0=[1, 3]).mean(dim='mean_criterion_dim_0'),
+
+        'Easy_Simple_vs_Easy_Complex': mu_c_samples.sel(mean_criterion_dim_0=0) -
+                                   mu_c_samples.sel(mean_criterion_dim_0=1),
+
+        'Easy_Simple_vs_Hard_Simple': mu_c_samples.sel(mean_criterion_dim_0=0) -
+                                  mu_c_samples.sel(mean_criterion_dim_0=2),
+
+        'Hard_Simple_vs_Hard_Complex': mu_c_samples.sel(mean_criterion_dim_0=2) -
+                                   mu_c_samples.sel(mean_criterion_dim_0=3),
+
+        'Easy_Complex_vs_Hard_Complex': mu_c_samples.sel(mean_criterion_dim_0=1) -
+                                    mu_c_samples.sel(mean_criterion_dim_0=3)
+    }
+
+    c_idata = az.from_dict(posterior={name: val for name, val in c_contrasts.items()})
+
+    for name in c_contrasts:
+        print(f"\nSummary of criterion difference: {name.replace('_', ' ')}")
+        print(az.summary(c_idata, var_names=[name], hdi_prob=0.94))
+
+        az.plot_posterior(c_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
+        plt.tight_layout()
+        plt.suptitle(f"Posterior of Criterion Contrast: {name.replace('_', ' ')}", y=1.02)
+        plt.savefig(FIG_DIR / f"criterion_contrast_{name}.png")
         plt.close()
 
 #delta plots
@@ -411,11 +475,11 @@ def analyze_results(idata, data):
 
 # Main execution
 def run_analysis():
-    sdt_data = read_data(DATA_DIR / 'data.csv', prepare_for='sdt')
-    trial_data = read_data(DATA_DIR / 'data.csv', prepare_for='delta plots') 
-    model = apply_hierarchical_sdt_model(sdt_data)
+    data = read_data(DATA_DIR / 'data.csv', prepare_for='sdt')
+    model = apply_hierarchical_sdt_model(data)
     idata = sample_posterior(model, draws=2000, tune=1000, chains=4, target_accept=0.9)
-    analyze_results(idata, trial_data)
+    delta_data = read_data(DATA_DIR / 'data.csv', prepare_for='delta plots')
+    analyze_results(idata, delta_data)
 
 
 if __name__ == "__main__":
