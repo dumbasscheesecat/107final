@@ -341,20 +341,20 @@ def analyze_results(idata, data):
     plt.savefig(FIG_DIR / "trace_group_params.png")
     plt.close()
 
-#posterior distributions, conversion to dataframe by gpt
     az.plot_posterior(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
     plt.savefig(FIG_DIR / "posterior_group_params.png")
     plt.close()
 
+#posterior distributions, conversion to dataframe by gpt
+
     d = idata.posterior['d_prime'].mean(dim=('chain', 'draw')).values
     c = idata.posterior['criterion'].mean(dim=('chain', 'draw')).values
-
     n_participants, n_conditions = d.shape
-    d_df = pd.DataFrame(d, columns=[f"d_{CONDITION_NAMES[i]}" for i in range(n_conditions)])
-    d_df['pnum'] = range(1, n_participants + 1)
 
-    c_df = pd.DataFrame(c, columns=[f"c_{CONDITION_NAMES[i]}" for i in range(n_conditions)])
+    d_df = pd.DataFrame(d, columns=[f"d_{i}" for i in range(n_conditions)])
+    d_df['pnum'] = range(1, n_participants + 1)
+    c_df = pd.DataFrame(c, columns=[f"c_{i}" for i in range(n_conditions)])
     c_df['pnum'] = range(1, n_participants + 1)
 
     full_df = pd.merge(d_df, c_df, on='pnum')
@@ -365,51 +365,17 @@ def analyze_results(idata, data):
     plt.savefig(FIG_DIR / "forest_plot_d_c.png")
     plt.close()
 
-#additional stats, just in case, separated out into conditions, dataframe framing by gpt
-    descriptive = []
-    desc_df = pd.DataFrame(descriptive)
-
-    for pid, pdata in data.groupby("pnum"):
-        for condition_id, cname in CONDITION_NAMES.items():
-            cdata = pdata[pdata.condition == condition_id]
-            hits = ((cdata.signal == 0) & (cdata.response == 1)).sum()
-            misses = ((cdata.signal == 0) & (cdata.response == 0)).sum()
-            fas = ((cdata.signal == 1) & (cdata.response == 1)).sum()
-            crs = ((cdata.signal == 1) & (cdata.response == 0)).sum()
-
-            hit_rate = hits / (hits + misses) if (hits + misses) > 0 else np.nan
-            fa_rate = fas / (fas + crs) if (fas + crs) > 0 else np.nan
-            acc = (hits + crs) / len(cdata) if len(cdata) > 0 else np.nan
-            rt_mean = cdata.rt.mean()
-
-            descriptive.append({
-                "participant": pid,
-                "condition": cname,
-                "accuracy": acc,
-                "hit_rate": hit_rate,
-                "false_alarm_rate": fa_rate,
-                "mean_rt": rt_mean
-            })
-
 #max and min stats by conditions, desc_df.groupby is gpt
+    desc_df = data.groupby(['pnum', 'condition']).apply(lambda df: pd.Series({
+        'mean_rt': df[[f'p{p}' for p in [10,30,50,70,90]]].mean(axis=1).mean()
+    })).reset_index()
+
     stat_summary = desc_df.groupby("condition").agg(
-        max_accuracy=('accuracy', 'max'),
-        min_accuracy=('accuracy', 'min'),
-        max_hit_rate=('hit_rate', 'max'),
-        min_hit_rate=('hit_rate', 'min'),
-        max_fa_rate=('false_alarm_rate', 'max'),
-        min_fa_rate=('false_alarm_rate', 'min'),
         max_rt=('mean_rt', 'max'),
         min_rt=('mean_rt', 'min')
     )
 
     idxs = {
-        'max_accuracy': desc_df.groupby("condition")['accuracy'].idxmax(),
-        'min_accuracy': desc_df.groupby("condition")['accuracy'].idxmin(),
-        'max_hit_rate': desc_df.groupby("condition")['hit_rate'].idxmax(),
-        'min_hit_rate': desc_df.groupby("condition")['hit_rate'].idxmin(),
-        'max_fa_rate': desc_df.groupby("condition")['false_alarm_rate'].idxmax(),
-        'min_fa_rate': desc_df.groupby("condition")['false_alarm_rate'].idxmin(),
         'max_rt': desc_df.groupby("condition")['mean_rt'].idxmax(),
         'min_rt': desc_df.groupby("condition")['mean_rt'].idxmin(),
     }
@@ -427,7 +393,7 @@ def analyze_results(idata, data):
         'Easy_Simple_vs_Hard_Complex': mu_d_samples[..., 0] - mu_d_samples[..., 3],
         'Easy_Complex_vs_Hard_Simple': mu_d_samples[..., 1] - mu_d_samples[..., 2]
     }
-    contrast_idata = az.from_dict(posterior={name: val for name, val in contrasts.items()})
+    contrast_idata = az.from_dict(posterior={name: val for name, val in contrasts.items()}) #gpt suggested
 
     for name in contrasts:
         print(f"\nSummary of d' difference: {name.replace('_', ' ')}")
