@@ -313,45 +313,147 @@ def draw_delta_plots(data, pnum):
     plt.savefig(OUTPUT_DIR / f'delta_plots_{pnum}.png')
 
 #MY STUFFS
+
+ROOT_DIR = Path(__file__).parent.parent
+DATA_DIR = ROOT_DIR / "data"
+FIG_DIR = ROOT_DIR / "figures"
+OUT_DIR = Path("outputs")
+OUT_DIR.mkdir(exist_ok=True)
+
 def sample_posterior(model, draws, tune, chains, target_accept): 
     with model: 
         idata = pm.sample(draws=draws, tune=tune, chains=chains, target_accept=target_accept)
     return idata
 
-def analyze_results(idata):
+
+def analyze_results(idata, data):
     print('Hierarchical SDT Model Summary')
+    P = len(data['pnum'].unique())
+    C = len(data['condition'].unique())
+
 #converge checking
     print("\nConvergence Check")
-    summary = az.summary(idata, var_names=['mu_d_k', 'sigma_d_k', 'mu_c_k', 'sigma_c_k'], hdi_prob=0.94)
-    print(ummary)
+    summary = az.summary(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"], hdi_prob=0.94)
+    print(summary)
 
-    az.plot_trace(idata, var_names=['mu_d_k', 'sigma_d_k', 'mu_c_k', 'sigma_c_k'])
+    az.plot_trace(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
     plt.savefig(FIG_DIR / "trace_group_params.png")
     plt.close()
 
-#posterior distributions
-    az.plot_posterior(idata, var_names=['mu_d_k', 'sigma_d_k', 'mu_c_k', 'sigma_c_k'])
+#posterior distributions, conversion to dataframe by gpt
+    az.plot_posterior(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
     plt.savefig(FIG_DIR / "posterior_group_params.png")
     plt.close()
 
-    
+    d = idata.posterior['d_prime'].mean(dim=('chain', 'draw')).values
+    c = idata.posterior['criterion'].mean(dim=('chain', 'draw')).values
 
+    n_participants, n_conditions = d.shape
+    d_df = pd.DataFrame(d, columns=[f"d_{CONDITION_NAMES[i]}" for i in range(n_conditions)])
+    d_df['pnum'] = range(1, n_participants + 1)
+
+    c_df = pd.DataFrame(c, columns=[f"c_{CONDITION_NAMES[i]}" for i in range(n_conditions)])
+    c_df['pnum'] = range(1, n_participants + 1)
+
+    full_df = pd.merge(d_df, c_df, on='pnum')
+    full_df.to_csv(OUT_DIR / "participant_condition_posterior_estimates.csv", index=False)
+
+    az.plot_forest(idata, var_names=['d_prime', 'criterion'], combined=True)
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "forest_plot_d_c.png")
+    plt.close()
+
+#additional stats, just in case, separated out into conditions, dataframe framing by gpt
+    descriptive = []
+    desc_df = pd.DataFrame(descriptive)
+
+    for pid, pdata in data.groupby("pnum"):
+        for condition_id, cname in CONDITION_NAMES.items():
+            cdata = pdata[pdata.condition == condition_id]
+            hits = ((cdata.signal == 0) & (cdata.response == 1)).sum()
+            misses = ((cdata.signal == 0) & (cdata.response == 0)).sum()
+            fas = ((cdata.signal == 1) & (cdata.response == 1)).sum()
+            crs = ((cdata.signal == 1) & (cdata.response == 0)).sum()
+
+            hit_rate = hits / (hits + misses) if (hits + misses) > 0 else np.nan
+            fa_rate = fas / (fas + crs) if (fas + crs) > 0 else np.nan
+            acc = (hits + crs) / len(cdata) if len(cdata) > 0 else np.nan
+            rt_mean = cdata.rt.mean()
+
+            descriptive.append({
+                "participant": pid,
+                "condition": cname,
+                "accuracy": acc,
+                "hit_rate": hit_rate,
+                "false_alarm_rate": fa_rate,
+                "mean_rt": rt_mean
+            })
+
+#max and min stats by conditions, desc_df.groupby is gpt
+    stat_summary = desc_df.groupby("condition").agg(
+        max_accuracy=('accuracy', 'max'),
+        min_accuracy=('accuracy', 'min'),
+        max_hit_rate=('hit_rate', 'max'),
+        min_hit_rate=('hit_rate', 'min'),
+        max_fa_rate=('false_alarm_rate', 'max'),
+        min_fa_rate=('false_alarm_rate', 'min'),
+        max_rt=('mean_rt', 'max'),
+        min_rt=('mean_rt', 'min')
+    )
+
+    idxs = {
+        'max_accuracy': desc_df.groupby("condition")['accuracy'].idxmax(),
+        'min_accuracy': desc_df.groupby("condition")['accuracy'].idxmin(),
+        'max_hit_rate': desc_df.groupby("condition")['hit_rate'].idxmax(),
+        'min_hit_rate': desc_df.groupby("condition")['hit_rate'].idxmin(),
+        'max_fa_rate': desc_df.groupby("condition")['false_alarm_rate'].idxmax(),
+        'min_fa_rate': desc_df.groupby("condition")['false_alarm_rate'].idxmin(),
+        'max_rt': desc_df.groupby("condition")['mean_rt'].idxmax(),
+        'min_rt': desc_df.groupby("condition")['mean_rt'].idxmin(),
+    }
+
+    for key, idx in idxs.items():
+        stat_summary[f"{key}_participant"] = desc_df.loc[idx, 'pnum'].values
+
+    stat_summary.to_csv(OUT_DIR / "condition_stat_summary.csv")
+
+#final summary for comparison like with stroop.py
+    mu_d_samples = idata.posterior['mu_d_k']
+    contrasts = { #this setup by gpt
+        'Easy_vs_Hard': mu_d_samples[..., 0:2].mean(dim=-1) - mu_d_samples[..., 2:4].mean(dim=-1),
+        'Simple_vs_Complex': mu_d_samples[..., [0,2]].mean(dim=-1) - mu_d_samples[..., [1,3]].mean(dim=-1),
+        'Easy_Simple_vs_Hard_Complex': mu_d_samples[..., 0] - mu_d_samples[..., 3],
+        'Easy_Complex_vs_Hard_Simple': mu_d_samples[..., 1] - mu_d_samples[..., 2]
+    }
+    contrast_idata = az.from_dict(posterior={name: val for name, val in contrasts.items()})
+
+    for name in contrasts:
+        print(f"\nSummary of d' difference: {name.replace('_', ' ')}")
+        print(az.summary(contrast_idata, var_names=[name], hdi_prob=0.94))
+
+        az.plot_posterior(contrast_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
+        plt.tight_layout()
+        plt.suptitle(f"Posterior of d' Contrast: {name.replace('_', ' ')}", y=1.02)
+        plt.savefig(FIG_DIR / f"dprime_contrast_{name}.png")
+        plt.close()
+
+#delta plots
+    for pnum in data['pnum'].unique():
+        draw_delta_plots(data, pnum)
 
 # Main execution
-ROOT_DIR = Path(__file__).parent.parent
-DATA_DIR = ROOT_DIR / "data"
-FIG_DIR = ROOT_DIR / "figures"
-
 def run_analysis():
-    data = read_data(DATA_DIR / 'data.csv')
-    model = apply_hierarchical_sdt_model(data)
+    sdt_data = read_data(DATA_DIR / 'data.csv', prepare_for='sdt')
+    trial_data = read_data(DATA_DIR / 'data.csv', prepare_for='delta plots') 
+    model = apply_hierarchical_sdt_model(sdt_data)
     idata = sample_posterior(model, draws=2000, tune=1000, chains=4, target_accept=0.9)
-    analyze_results(idata)
+    analyze_results(idata, trial_data)
+
 
 if __name__ == "__main__":
-    file_to_print = Path(__file__).parent / 'README.md'
+    file_to_print = Path(__file__).parent.parent / 'README.md' #add the other parent since i have this folder structure
     with open(file_to_print, 'r') as file:
         print(file.read())
     run_analysis()
