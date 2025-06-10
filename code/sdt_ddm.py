@@ -10,6 +10,11 @@ import pandas as pd
 from pathlib import Path
 import os
 
+ROOT_DIR = Path(__file__).parent.parent
+DATA_DIR = ROOT_DIR / "data"
+OUTPUT_DIR = ROOT_DIR / "output" #you put output dir within a function so im putting one outside also
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 # Mapping dictionaries for categorical variables
 # These convert categorical labels to numeric codes for analysis
 MAPPINGS = {
@@ -314,38 +319,40 @@ def draw_delta_plots(data, pnum):
 
 #MY STUFFS
 
-ROOT_DIR = Path(__file__).parent.parent
-DATA_DIR = ROOT_DIR / "data"
-FIG_DIR = ROOT_DIR / "figures"
-OUT_DIR = ROOT_DIR / "output"
-
 def sample_posterior(model, draws, tune, chains, target_accept): 
     with model: 
         idata = pm.sample(draws=draws, tune=tune, chains=chains, target_accept=target_accept)
     return idata
 
+#showing hit rate and false alarm rate for original dataset
+def show_summary_sdt(data):
+    sdt_df = data
+    sdt_df['hit_rate'] = sdt_df['hits'] / sdt_df['nSignal']
+    sdt_df['fa_rate'] = sdt_df['false_alarms'] / sdt_df['nNoise']
+
+    sdt_df.to_csv(OUTPUT_DIR / "original_data_summary.csv", index=False)
 
 def analyze_results(idata, data):
     print('Hierarchical SDT Model Summary')
     P = len(data['pnum'].unique())
     C = len(data['condition'].unique())
 
-#converge checking
+    #converge checking
     print("\nConvergence Check")
     summary = az.summary(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"], hdi_prob=0.94)
     print(summary)
 
     az.plot_trace(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "trace_group_params.png")
+    plt.savefig(OUTPUT_DIR / "trace_group_params.png")
     plt.close()
 
     az.plot_posterior(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "posterior_group_params.png")
+    plt.savefig(OUTPUT_DIR / "posterior_group_params.png")
     plt.close()
 
-#posterior distributions, conversion to dataframe by gpt
+    #posterior distributions, conversion to dataframe by gpt
 
     d = idata.posterior['d_prime'].mean(dim=('chain', 'draw')).values
     c = idata.posterior['criterion'].mean(dim=('chain', 'draw')).values
@@ -357,23 +364,23 @@ def analyze_results(idata, data):
     c_df['pnum'] = range(1, n_participants + 1)
 
     full_df = pd.merge(d_df, c_df, on='pnum')
-    full_df.to_csv(OUT_DIR / "participant_condition_posterior_estimates.csv", index=False)
+    full_df.to_csv(OUTPUT_DIR / "participant_condition_posterior_estimates.csv", index=False)
 
     az.plot_forest(idata, var_names=['d_prime', 'criterion'], combined=True)
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "forest_plot_d_c.png")
+    plt.savefig(OUTPUT_DIR / "forest_plot_d_c.png")
     plt.close()
 
-#min and max false alarm and hit rate of idata
-    hit_rates = 1 / (1 + np.exp(-(d - c)))  # sigmoid(d - c)
-    fa_rates = 1 / (1 + np.exp(c))          # sigmoid(-c)
+    #min and max false alarm and hit rate of idata
+    hit_rates = 1 / (1 + np.exp(-(d - c)))  #gpt implementation 
+    fa_rates = 1 / (1 + np.exp(c))          
 
     hr_df = pd.DataFrame(hit_rates, columns=[f"hit_{i}" for i in range(hit_rates.shape[1])])
     fa_df = pd.DataFrame(fa_rates, columns=[f"fa_{i}" for i in range(fa_rates.shape[1])])
     hr_df['pnum'] = range(1, hit_rates.shape[0] + 1)
     fa_df['pnum'] = range(1, fa_rates.shape[0] + 1)
 
-    rates_df = pd.merge(hr_df, fa_df, on='pnum')
+    rates_df = pd.merge(hr_df, fa_df, on='pnum') #gpt for format
     hr_long = hr_df.melt(id_vars='pnum', var_name='condition', value_name='hit_rate')
     fa_long = fa_df.melt(id_vars='pnum', var_name='condition', value_name='fa_rate')
     hr_long['condition'] = hr_long['condition'].str.extract(r'(\d+)').astype(int)
@@ -397,9 +404,11 @@ def analyze_results(idata, data):
     for key, idx in idxs.items():
         rate_summary[f"{key}_participant"] = rate_df.loc[idx, 'pnum'].values
 
-    rate_summary.to_csv(OUT_DIR / "condition_rate_summary.csv")
+    rate_summary.to_csv(OUTPUT_DIR / "max_min_posterior_rates.csv")
+    rate_df.to_csv(OUTPUT_DIR / "participant_condition_posterior_rates.csv", index=False) #gpt's code to separate out to dfs for ease of viewing information
 
-#final summary for comparison like with stroop.py, first is discriminability
+
+    #final summary for comparison like with stroop.py, first is discriminability
     mu_d_samples = idata.posterior['mean_d_prime']
 
     d_contrasts = { #this setup by gpt
@@ -430,10 +439,10 @@ def analyze_results(idata, data):
         az.plot_posterior(d_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
         plt.tight_layout()
         plt.suptitle(f"Posterior of d' Contrast: {name.replace('_', ' ')}", y=1.02)
-        plt.savefig(FIG_DIR / f"dprime_contrast_{name}.png")
+        plt.savefig(OUTPUT_DIR / f"dprime_contrast_{name}.png")
         plt.close()
 
-#for criterion
+    #for criterion
     mu_c_samples = idata.posterior['mean_criterion']
 
     c_contrasts = {
@@ -465,16 +474,17 @@ def analyze_results(idata, data):
         az.plot_posterior(c_idata, var_names=[name], hdi_prob=0.94, ref_val=0)
         plt.tight_layout()
         plt.suptitle(f"Posterior of Criterion Contrast: {name.replace('_', ' ')}", y=1.02)
-        plt.savefig(FIG_DIR / f"criterion_contrast_{name}.png")
+        plt.savefig(OUTPUT_DIR / f"criterion_contrast_{name}.png")
         plt.close()
 
-#delta plots
+    #delta plots
     for pnum in data['pnum'].unique():
         draw_delta_plots(data, pnum)
 
 # Main execution
 def run_analysis():
     data = read_data(DATA_DIR / 'data.csv', prepare_for='sdt')
+    show_summary_sdt(data)
     model = apply_hierarchical_sdt_model(data)
     idata = sample_posterior(model, draws=2000, tune=1000, chains=4, target_accept=0.9)
     delta_data = read_data(DATA_DIR / 'data.csv', prepare_for='delta plots')
