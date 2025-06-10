@@ -317,8 +317,7 @@ def draw_delta_plots(data, pnum):
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
 FIG_DIR = ROOT_DIR / "figures"
-OUT_DIR = Path("outputs")
-OUT_DIR.mkdir(exist_ok=True)
+OUT_DIR = ROOT_DIR / "output"
 
 def sample_posterior(model, draws, tune, chains, target_accept): 
     with model: 
