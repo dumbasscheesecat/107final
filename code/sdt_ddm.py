@@ -6,7 +6,6 @@ import numpy as np
 import pymc as pm
 import arviz as az
 import matplotlib.pyplot as plt
-from scipy.stats import norm
 import pandas as pd
 from pathlib import Path
 import os
@@ -314,7 +313,6 @@ def draw_delta_plots(data, pnum):
     # Save the figure
     plt.savefig(OUTPUT_DIR / f'delta_plots_{pnum}.png')
     plt.close(fig) #added for debugging
-    print(f"Saved delta plot for participant {pnum} to {OUTPUT_DIR}")
 
 #MY STUFFS
 
@@ -328,8 +326,6 @@ def show_summary_sdt(data):
     sdt_df = data
     sdt_df['hit_rate'] = sdt_df['hits'] / sdt_df['nSignal']
     sdt_df['fa_rate'] = sdt_df['false_alarms'] / sdt_df['nNoise']
-    sdt_df['d_prime'] = norm.ppf(sdt_df['hit_rate']) - norm.ppf(sdt_df['fa_rate'])
-    sdt_df['criterion'] = -0.5 * (norm.ppf(sdt_df['hit_rate']) + norm.ppf(sdt_df['fa_rate']))
 
     sdt_df.to_csv(OUTPUT_DIR / "naive_data_summary.csv", index=False)
 
@@ -384,7 +380,7 @@ def analyze_results(idata, data):
     plt.savefig(OUTPUT_DIR / "overall_forest_plot.png")
     plt.close()
 
-    #min and max false alarm and hit rate of idata
+    #min and max false alarm and hit rate of idata, also overall for naive aggregation comparison
     hit_rates = 1 / (1 + np.exp(-(d - c)))
     fa_rates = 1 / (1 + np.exp(c))          
 
