@@ -6,6 +6,7 @@ import numpy as np
 import pymc as pm
 import arviz as az
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 import pandas as pd
 from pathlib import Path
 import os
@@ -322,35 +323,37 @@ def sample_posterior(model, draws, tune, chains, target_accept):
         idata = pm.sample(draws=draws, tune=tune, chains=chains, target_accept=target_accept)
     return idata
 
-#showing hit rate and false alarm rate for original dataset
+#showing hit rate and false alarm rate for original dataset, in case i need for comparisons
 def show_summary_sdt(data):
     sdt_df = data
     sdt_df['hit_rate'] = sdt_df['hits'] / sdt_df['nSignal']
     sdt_df['fa_rate'] = sdt_df['false_alarms'] / sdt_df['nNoise']
+    sdt_df['d_prime'] = norm.ppf(sdt_df['hit_rate']) - norm.ppf(sdt_df['fa_rate'])
+    sdt_df['criterion'] = -0.5 * (norm.ppf(sdt_df['hit_rate']) + norm.ppf(sdt_df['fa_rate']))
 
-    sdt_df.to_csv(OUTPUT_DIR / "original_data_summary.csv", index=False)
+    sdt_df.to_csv(OUTPUT_DIR / "naive_data_summary.csv", index=False)
 
 def analyze_results(idata, data):
     print('Hierarchical SDT Model Summary')
     P = len(data['pnum'].unique())
     C = len(data['condition'].unique())
 
-    #converge checking
+    #convergence checking
     print("\nConvergence Check")
     summary = az.summary(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"], hdi_prob=0.94)
     print(summary)
 
     az.plot_trace(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "trace_group_params.png")
+    plt.savefig(OUTPUT_DIR / "overall_trace_plot.png")
     plt.close()
 
     az.plot_posterior(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "posterior_group_params.png")
+    plt.savefig(OUTPUT_DIR / "overall_posterior_plot.png")
     plt.close()
 
-    #posterior distributions, conversion to dataframe by gpt
+    #posterior distributions
 
     d = idata.posterior['d_prime'].mean(dim=('chain', 'draw')).values
     c = idata.posterior['criterion'].mean(dim=('chain', 'draw')).values
@@ -362,15 +365,27 @@ def analyze_results(idata, data):
     c_df['pnum'] = range(1, n_participants + 1)
 
     full_df = pd.merge(d_df, c_df, on='pnum')
-    full_df.to_csv(OUTPUT_DIR / "participant_condition_posterior_estimates.csv", index=False)
+
+    overall_d = d.mean()
+    overall_c = c.mean()
+
+    overall_hit_rate = 1 / (1 + np.exp(-(overall_d - overall_c)))
+    overall_fa_rate = 1 / (1 + np.exp(overall_c))
+
+    overall_row = {f"d_{i}": d[:, i].mean() for i in range(n_conditions)}
+    overall_row.update({f"c_{i}": c[:, i].mean() for i in range(n_conditions)})
+    overall_row['pnum'] = 'overall'
+
+    full_df = pd.concat([full_df, pd.DataFrame([overall_row])])
+    full_df.to_csv(OUTPUT_DIR / "overall_posterior_parameters.csv", index=False)
 
     az.plot_forest(idata, var_names=['d_prime', 'criterion'], combined=True)
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "forest_plot_d_c.png")
+    plt.savefig(OUTPUT_DIR / "overall_forest_plot.png")
     plt.close()
 
     #min and max false alarm and hit rate of idata
-    hit_rates = 1 / (1 + np.exp(-(d - c)))  #gpt implementation 
+    hit_rates = 1 / (1 + np.exp(-(d - c)))
     fa_rates = 1 / (1 + np.exp(c))          
 
     hr_df = pd.DataFrame(hit_rates, columns=[f"hit_{i}" for i in range(hit_rates.shape[1])])
@@ -378,8 +393,8 @@ def analyze_results(idata, data):
     hr_df['pnum'] = range(1, hit_rates.shape[0] + 1)
     fa_df['pnum'] = range(1, fa_rates.shape[0] + 1)
 
-    rates_df = pd.merge(hr_df, fa_df, on='pnum') #gpt for format
-    hr_long = hr_df.melt(id_vars='pnum', var_name='condition', value_name='hit_rate')
+    rates_df = pd.merge(hr_df, fa_df, on='pnum') 
+    hr_long = hr_df.melt(id_vars='pnum', var_name='condition', value_name='hit_rate') #gpt for format
     fa_long = fa_df.melt(id_vars='pnum', var_name='condition', value_name='fa_rate')
     hr_long['condition'] = hr_long['condition'].str.extract(r'(\d+)').astype(int)
     fa_long['condition'] = fa_long['condition'].str.extract(r'(\d+)').astype(int)
@@ -403,15 +418,15 @@ def analyze_results(idata, data):
         rate_summary[f"{key}_participant"] = rate_df.loc[idx, 'pnum'].values
 
     rate_summary.to_csv(OUTPUT_DIR / "max_min_posterior_rates.csv")
-    rate_df.to_csv(OUTPUT_DIR / "participant_condition_posterior_rates.csv", index=False) #gpt's code to separate out to dfs for ease of viewing information
+    rate_df.to_csv(OUTPUT_DIR / "overall_posterior_rates.csv", index=False) #gpt's code to separate out to dfs for ease of viewing information
 
 
     #final summary for comparison like with stroop.py, first is discriminability
     mu_d_samples = idata.posterior['mean_d_prime']
 
-    d_contrasts = { #this setup by gpt
+    d_contrasts = {
         'Easy_vs_Hard': mu_d_samples.sel(mean_d_prime_dim_0=[0, 1]).mean(dim='mean_d_prime_dim_0') -
-                        mu_d_samples.sel(mean_d_prime_dim_0=[2, 3]).mean(dim='mean_d_prime_dim_0'),
+                        mu_d_samples.sel(mean_d_prime_dim_0=[2, 3]).mean(dim='mean_d_prime_dim_0'), #.sel by gpt
 
         'Simple_vs_Complex': mu_d_samples.sel(mean_d_prime_dim_0=[0, 2]).mean(dim='mean_d_prime_dim_0') -
                             mu_d_samples.sel(mean_d_prime_dim_0=[1, 3]).mean(dim='mean_d_prime_dim_0'),
