@@ -1,1 +1,7 @@
 # 107final
+
+All code can be found within /code/sdt_ddm.py as directed in the discussion boards. Data.csv is in /data. Output contains all graphs and tables. I decided to save all types of analysis aside from summaries for ease of viewing during the actual exam. File names should be fairly intuitive, but elaborations will also be listed below. 
+
+In terms of convergence, the model is identifiable. R_hat is equal to 1, and ess are high. Trace plot (saved under overall_trace_plot) chains show good mixing and convergence.
+
+In terms of data, I tried to display as much information as possible. The first summary shows mean d' and criterion for all 4 conditions, which is then plotted in overall_posterior_plot. I then saved all d' and criterions for each participant per condition (with one overall row for the mean of 10 participants) in overall_posterior_rates. Maximum and minimum hit rate and false alarm rates are also saved in max_min_posterior_rates, but I also saved the rates for all 10 participants in a separate csv, overall_posterior_rates, just in case. I also saved the original dataset information in addition to their hit and false alarm rates in naive_data_summary to check the dataset validity and compare for naive aggregation as needed later. I then made forest plots for each condition comparison with dprime_contrast and criterion_contrast, just like full.py, as well as generate their summaries. Finally, I generated the delta plots for each participant using your function. 

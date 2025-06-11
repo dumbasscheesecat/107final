@@ -342,12 +342,12 @@ def analyze_results(idata, data):
     plt.savefig(OUTPUT_DIR / "overall_trace_plot.png")
     plt.close()
 
+    #posterior distributions
+
     az.plot_posterior(idata, var_names=["mean_d_prime", "mean_criterion", "stdev_d_prime", "stdev_criterion"])
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "overall_posterior_plot.png")
     plt.close()
-
-    #posterior distributions
 
     d = idata.posterior['d_prime'].mean(dim=('chain', 'draw')).values
     c = idata.posterior['criterion'].mean(dim=('chain', 'draw')).values
@@ -366,12 +366,6 @@ def analyze_results(idata, data):
 
     full_df = pd.concat([full_df, pd.DataFrame([overall_row])])
     full_df.to_csv(OUTPUT_DIR / "overall_posterior_parameters.csv", index=False)
-
-    #forest plot for condition effects like in full.py
-    az.plot_posterior(idata, var_names=['d_prime', 'criterion'])
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "overall_forest_plot.png")
-    plt.close()
 
     #min and max false alarm and hit rate of idata, also overall for naive aggregation comparison
     hit_rates = 1 / (1 + np.exp(-(d - c)))
@@ -396,7 +390,7 @@ def analyze_results(idata, data):
         min_fa_rate=('fa_rate', 'min')
     )
 
-    idxs = {
+    idxs = { #gpt suggested
         'max_hit_rate': rate_df.groupby("condition")['hit_rate'].idxmax(),
         'min_hit_rate': rate_df.groupby("condition")['hit_rate'].idxmin(),
         'max_fa_rate': rate_df.groupby("condition")['fa_rate'].idxmax(),
@@ -410,7 +404,7 @@ def analyze_results(idata, data):
     rate_df.to_csv(OUTPUT_DIR / "overall_posterior_rates.csv", index=False) #gpt's code to separate out to dfs for ease of viewing information
 
 
-    #final summary for comparison like with stroop.py, first is discriminability
+    #final condition and forest plot and summary for comparison, first is discriminability
     mu_d_samples = idata.posterior['mean_d_prime']
 
     d_contrasts = {
