@@ -331,8 +331,6 @@ def show_summary_sdt(data):
 
 def analyze_results(idata, data):
     print('Hierarchical SDT Model Summary')
-    P = len(data['pnum'].unique())
-    C = len(data['condition'].unique())
 
     #convergence checking
     print("\nConvergence Check")
@@ -362,12 +360,6 @@ def analyze_results(idata, data):
 
     full_df = pd.merge(d_df, c_df, on='pnum')
 
-    overall_d = d.mean()
-    overall_c = c.mean()
-
-    overall_hit_rate = 1 / (1 + np.exp(-(overall_d - overall_c)))
-    overall_fa_rate = 1 / (1 + np.exp(overall_c))
-
     overall_row = {f"d_{i}": d[:, i].mean() for i in range(n_conditions)}
     overall_row.update({f"c_{i}": c[:, i].mean() for i in range(n_conditions)})
     overall_row['pnum'] = 'overall'
@@ -375,7 +367,8 @@ def analyze_results(idata, data):
     full_df = pd.concat([full_df, pd.DataFrame([overall_row])])
     full_df.to_csv(OUTPUT_DIR / "overall_posterior_parameters.csv", index=False)
 
-    az.plot_forest(idata, var_names=['d_prime', 'criterion'], combined=True)
+    #forest plot for condition effects like in full.py
+    az.plot_posterior(idata, var_names=['d_prime'])
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "overall_forest_plot.png")
     plt.close()
@@ -389,7 +382,6 @@ def analyze_results(idata, data):
     hr_df['pnum'] = range(1, hit_rates.shape[0] + 1)
     fa_df['pnum'] = range(1, fa_rates.shape[0] + 1)
 
-    rates_df = pd.merge(hr_df, fa_df, on='pnum') 
     hr_long = hr_df.melt(id_vars='pnum', var_name='condition', value_name='hit_rate') #gpt for format
     fa_long = fa_df.melt(id_vars='pnum', var_name='condition', value_name='fa_rate')
     hr_long['condition'] = hr_long['condition'].str.extract(r'(\d+)').astype(int)
@@ -410,6 +402,7 @@ def analyze_results(idata, data):
         'max_fa_rate': rate_df.groupby("condition")['fa_rate'].idxmax(),
         'min_fa_rate': rate_df.groupby("condition")['fa_rate'].idxmin(),
     }
+
     for key, idx in idxs.items():
         rate_summary[f"{key}_participant"] = rate_df.loc[idx, 'pnum'].values
 
@@ -441,7 +434,7 @@ def analyze_results(idata, data):
     }
     d_idata = az.from_dict(posterior={name: val for name, val in d_contrasts.items()}) #gpt suggested
 
-    for name in d_contrasts:
+    for name in d_contrasts: #like in full.py
         print(f"\nSummary of d' difference: {name.replace('_', ' ')}")
         print(az.summary(d_idata, var_names=[name], hdi_prob=0.94))
 
