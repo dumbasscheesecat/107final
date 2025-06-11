@@ -368,7 +368,7 @@ def analyze_results(idata, data):
     full_df.to_csv(OUTPUT_DIR / "overall_posterior_parameters.csv", index=False)
 
     #forest plot for condition effects like in full.py
-    az.plot_posterior(idata, var_names=['d_prime'])
+    az.plot_posterior(idata, var_names=['d_prime', 'criterion'])
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "overall_forest_plot.png")
     plt.close()
